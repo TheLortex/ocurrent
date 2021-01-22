@@ -35,6 +35,8 @@ module type ANALYSIS = sig
   val pp : _ term Fmt.t
   (** [pp] formats a [t] as a simple string. *)
 
+  val pp_html : job_info:(metadata -> Output.active option * string option) -> _ term Fmt.t
+
   val pp_dot :
     env:(string * string) list ->
     collapse_link:(k:string -> v:string -> string option) ->
@@ -83,7 +85,7 @@ module type TERM = sig
   (** [state t] always immediately returns a successful result giving the current state of [t].
       @param hidden If [true], don't show a separate node for this on the diagrams. *)
 
-  val catch : ?hidden:bool -> 'a t -> 'a or_error t
+  val catch : ?hidden:bool -> ?label:string -> 'a t -> 'a or_error t
   (** [catch t] successfully returns [Ok x] if [t] evaluates successfully to [x],
       or successfully returns [Error e] if [t] fails with error [e].
       If [t] is active then [catch t] will be active too.

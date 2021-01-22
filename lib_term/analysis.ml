@@ -44,6 +44,25 @@ module Make (Meta : sig type t end) = struct
     in
     aux f (Term x)
 
+    let pp_meta f = function 
+    | Constant None -> Fmt.pf f "<>" 
+    | Constant (Some l) -> Fmt.pf f "<%s>" l
+    | Map_input { source = _; info = Ok label } -> Fmt.string f label
+    | Map_input { source = _; info = Error `Blocked } -> Fmt.string f "(blocked)"
+    | Map_input { source = _; info = Error `Empty_list } -> Fmt.string f "(empty list)"
+    | Opt_input _ -> Fmt.pf f "opt_input"
+    | Bind_in _ -> Fmt.pf f "bind_in"
+    | Bind_out _ -> Fmt.pf f "bind_out"
+    | Primitive {info; _} -> Fmt.pf f "|>> %s" info
+    | Pair _ -> Fmt.pf f "pair"
+    | Gate_on _ -> Fmt.pf f "gate"
+    | List_map _ -> Fmt.pf f "list map" 
+    | Option_map _ -> Fmt.pf f "option map" 
+    | State _ -> Fmt.pf f "state"
+    | Catch _ -> Fmt.pf f "catch"
+    | Map _ -> Fmt.pf f "mpa"
+    | Collapse _ -> Fmt.pf f "collapse"
+
   module Node_set = Set.Make(struct type t = int let compare = compare end)
 
   module Out_node = struct
@@ -116,6 +135,217 @@ module Make (Meta : sig type t end) = struct
   let colour_of_activity = function
     | `Ready -> "#ffff00"
     | `Running -> "#ffa500"
+
+
+
+
+  type dag = Seq of (string * dag list) | Par of dag list | Node of generic | Empty_node
+  
+
+  (* Given two nodes, returns the closest ancestor if it exists, or None. *)
+  let get_common_ancestor t1 t2 =
+    let ancestors_1 = ref Id.Map.empty in
+    let ancestors_2 = ref Id.Map.empty 
+    in
+    let explore map_ref (Term t) = (* BFS *)
+      let to_do = Queue.create () in 
+      Queue.add (Term t, 0) to_do;
+      while not (Queue.is_empty to_do) do 
+        let (Term t, distance) = Queue.pop to_do in
+        if Id.Map.mem t.id !map_ref then
+          ()
+        else
+          map_ref := Id.Map.add t.id (Term t, distance) !map_ref;
+          match t.ty with 
+          | Primitive {x; _} -> Queue.add (x, distance+1) to_do
+          | Pair (a1, a2) -> (Queue.add (a1, distance+1) to_do; Queue.add (a2, distance+1) to_do)
+          | Gate_on {ctrl; value; _} -> (Queue.add (ctrl, distance+1) to_do; Queue.add (value, distance+1) to_do)
+          | Map x -> Queue.add (x, distance+1) to_do
+          | Bind_out v -> Queue.add (Current_incr.observe v, distance+1) to_do
+          | Catch {source; _} -> Queue.add (source, distance+1) to_do
+          | _ -> ()
+      done
+    in
+    explore ancestors_1 t1;
+    explore ancestors_2 t2;
+    let common = Id.Map.merge 
+    (fun _ d1 d2 -> match (d1,d2) with 
+      | Some (t, d1), Some (_, d2) -> Some (t, d1+d2)
+      | _ -> None) 
+      !ancestors_1 
+      !ancestors_2 
+    in
+    Id.Map.fold 
+    (fun id (t, distance) -> function 
+      | Some (min_id, (_, min_distance)) when distance > min_distance -> Some (min_id, (t, min_distance))
+      | _ -> Some (id, (t, distance)))
+      common
+      None
+    |> Option.map (fun (_, (t, _)) -> t) 
+    
+  let rec to_dag (Term t) stop_at =
+    match stop_at with 
+    | Some (Term t_stop) when t.id = t_stop.id -> (Printf.printf "the end\n%!"; Empty_node)
+    | _ ->
+    match t.ty with 
+    | Primitive {x; info; _} -> (Printf.printf "primitive\n%!"; Seq (info, [to_dag x stop_at; Node (Term t)]))
+    | Pair (a1, a2) -> 
+      begin 
+        Printf.printf "pair\n%!"; 
+        match get_common_ancestor a1 a2 with 
+        | None -> Par ([to_dag a1 stop_at; to_dag a2 stop_at])
+        | Some node -> Seq ("pair", [to_dag node stop_at; Par ([to_dag a1 (Some node); to_dag a2 (Some node)])])
+      end
+    | Gate_on {ctrl; value; _} ->
+      begin
+        Printf.printf "gate_on\n%!"; 
+        match get_common_ancestor ctrl value with 
+        | None -> Par ([to_dag ctrl stop_at; to_dag value stop_at])
+        | Some node -> Seq ("gate", [to_dag node stop_at; Par ([to_dag ctrl (Some node); to_dag value (Some node)])])
+      end
+    | Map next -> to_dag next stop_at
+    | Bind_in (value, _) -> to_dag value stop_at
+    | Bind_out value ->  to_dag (Current_incr.observe value) stop_at
+    | Map_input _ -> (Printf.printf "Map_input\n%!"; Node (Term t))
+    | Opt_input _ -> (Printf.printf "Opt_input\n%!"; Node (Term t))
+    | State _ -> (Printf.printf "State\n%!"; Node (Term t))
+    | Catch {source; label; _} -> (match t.bind with 
+      | None -> Seq (label, [to_dag source stop_at])
+      | Some ctx -> Seq (label, [to_dag ctx stop_at; to_dag source stop_at]))
+    
+    | List_map _ -> (Printf.printf "List_map\n%!"; Node (Term t))
+    | Option_map _ -> (Printf.printf "Option_map\n%!"; Node (Term t))
+    | Collapse _ -> (Printf.printf "Collapse\n%!"; Node (Term t))
+    | Constant (Some _) -> (match t.bind with 
+      | None -> Node (Term t)
+      | Some ctx -> Seq ("cst", [to_dag ctx stop_at; Node (Term t)]))
+    | Constant None -> (match t.bind with 
+      | None -> Node (Term t)
+      | Some ctx -> to_dag ctx stop_at)
+
+
+  let remove_type =
+    function 
+  | Constant None -> true
+  | _ -> false
+
+  let rec simplify = function 
+  | Node (Term t) when remove_type t.ty -> None
+  | Empty_node -> None
+  | Seq (lbl, lst) -> 
+    let lst = List.filter_map simplify lst in
+    (match lst with 
+    | [] -> None
+    | [Seq (_, lst)] -> Some (Seq (lbl, lst))
+    | [v] -> Some v
+    | lst -> Some (Seq (lbl, lst)))
+  | Par lst ->
+    let lst = List.filter_map simplify lst in
+    (match lst with 
+    | [] -> None
+    | [v] -> Some v
+    | lst -> Some (Par lst))
+  | node -> Some node
+
+  let rec flatten = function 
+  | Seq (lbl, lst) ->
+    let lst = List.map 
+      (fun node -> match flatten node with 
+        | Seq (_, lst) -> lst 
+        | node -> [node])
+      lst |> List.flatten in 
+    Seq (lbl, lst)
+  | Par lst ->
+    let lst = List.map 
+      (fun node -> match flatten node with 
+        | Par lst -> lst 
+        | node -> [node]) 
+      lst |> List.flatten in 
+    Par lst
+  | Node n -> Node n 
+  | Empty_node -> Empty_node
+
+
+  type status = [`Done | `Ready | `Running | `Error | `Blocked]
+
+
+  let int_of_status = function 
+    | `Done -> 0
+    | `Blocked -> 1
+    | `Ready -> 2
+    | `Running -> 3
+    | `Error -> 4 
+      
+
+  let color_of_status = function 
+    | `Done -> "#90ee90"
+    | `Blocked -> "#d3d3d3"
+    | `Error -> "#ff4500"
+    | `Ready | `Running as x -> colour_of_activity x
+
+  let get_term_status (Term t) : status =
+    let v = Current_incr.observe t.v in 
+    let error_from_self =
+      match v with
+      | Ok _ -> false
+      | Error (id, _) when Id.equal id t.id -> true
+      | Error (id, _) ->
+        match t.ty with
+        | Collapse { input = Term input; _} ->
+          (* The error isn't from us. but this is a collapsed node. If we're just propagating
+             an error from our input then keep that, but report errors from within the collapsed
+             group as from us. *)
+          begin match Current_incr.observe input.v with
+            | Error (orig_id, _) -> not (Id.equal id orig_id)
+            | Ok _ -> true
+          end
+        | _ -> false
+    in
+    match v with 
+    | Ok _ -> `Done
+    | Error _ when not error_from_self -> `Blocked (* Blocked *)
+    | Error (_, `Active x) -> (x :> status)
+    | Error (_, `Msg _) -> `Error
+
+  let rec get_status = function 
+    | Par lst | Seq (_, lst)  -> 
+      let statuses = List.map get_status lst in
+      let (v, _) = List.fold_left (fun (k,v) s  -> 
+        let v2 = int_of_status s in 
+        if v2 > v then (s, v2) else (k, v) ) (`Done, 0) statuses 
+      in v
+    | Node t -> get_term_status t
+    | Empty_node -> `Error
+
+
+  let rec pp_dag ~job_info f = function
+    | Par lst -> begin 
+      Fmt.pf f "<div>"; 
+      List.iter (fun i -> Fmt.pf f "<div style='margin: 10px; padding-left: 16px; border-left: solid %s 3px'><div>%a</div></div>" (get_status i |> color_of_status) (pp_dag ~job_info) i) lst; 
+      Fmt.pf f "</div>"
+    end
+    | Seq (lbl, lst) -> begin 
+      Fmt.pf f "<details><summary>%s</summary><ol style='list-style: none;'>" lbl; 
+      List.iteri (fun k i -> Fmt.pf f "<li><span style='color: %s'>%d) </span><div style='display: inline-block; vertical-align: top'>%a</div>" (get_status i |> color_of_status) (k+1) (pp_dag ~job_info) i) lst; 
+      Fmt.pf f "</ol></details>"
+    end
+    | Node (Term t) -> (match t.ty with 
+      | Primitive {info; meta; _} ->
+        let _, url =
+          match Current_incr.observe meta with
+          | None -> None, None
+          | Some id -> job_info id
+        in
+         Fmt.pf f "<a href='%a'>%s</a>" (Fmt.option Fmt.string) url info
+      | Constant (Some str) -> Fmt.pf f ">%s" str
+      | Constant None -> Fmt.pf f "><" 
+      | meta -> Fmt.pf f "%a" pp_meta meta
+    )
+    | Empty_node -> ()
+
+  let pp_html ~job_info f x = 
+    let dag = to_dag (Term x) None |> simplify |> Option.get |> flatten in
+    pp_dag ~job_info f dag
 
   let pp_dot ~env ~collapse_link ~job_info f x =
     let env = Env.of_seq (List.to_seq env) in
@@ -235,7 +465,7 @@ module Make (Meta : sig type t end) = struct
             Out_node.connect (edge_to i) data_inputs;
             let deps = Out_node.(union ctrls data_inputs) in
             Out_node.singleton ~deps i
-          | Catch { source; hidden = true }
+          | Catch { source; hidden = true; _ }
           | State { source; hidden = true } ->
             aux source
           | State { source; hidden = false } ->
@@ -249,7 +479,7 @@ module Make (Meta : sig type t end) = struct
                yet knowing the commit. So the set_state node can't run even though its
                state input is ready and transitively depends on knowing the commit. *)
             Out_node.singleton ~deps:Out_node.empty i
-          | Catch { source; hidden = false } ->
+          | Catch { source; hidden = false; _ } ->
             let inputs = aux source in
             node i "catch";
             let all_inputs = Out_node.union inputs ctx in
@@ -385,7 +615,7 @@ module Make (Meta : sig type t end) = struct
             let _ : Out_node.t = aux source in
             if not hidden then count ();
             Out_node.singleton ~deps:Out_node.empty i
-          | Catch { source; hidden } ->
+          | Catch { source; hidden; _ } ->
             let inputs = aux source in
             if not hidden then count ();
             let all_inputs = Out_node.union inputs ctx in
