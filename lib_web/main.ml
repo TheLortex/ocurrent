@@ -26,19 +26,25 @@ let settings ctx config =
     input ~a:[a_input_type `Submit; a_value "Submit"] ();
   ]
 
+
+let render_pipeline ~job_info a = Fmt.str "%a" (Current.Analysis.pp_html ~job_info) a
+
 let r ~engine = object
   inherit Resource.t
 
   val! can_get = `Viewer
 
   method! private get ctx =
-    let uri = Context.uri ctx in
     let config = Current.Engine.config engine in
+    let pipeline = Current.Engine.pipeline engine in
     let { Current.Engine.value; jobs = _ } = Current.Engine.state engine in
-    let path = "/pipeline.svg?" ^ (Option.value (Uri.verbatim_query uri) ~default:"") in
+    let job_info { Current.Metadata.job_id; update } =
+      let url = job_id |> Option.map (fun id -> Fmt.str "/job/%s" id) in
+      update, url 
+    in
     Context.respond_ok ctx [
       div [
-        object_ ~a:[a_data path] [txt "Pipeline diagram"];
+        Unsafe.data (render_pipeline ~job_info pipeline);
       ];
       h2 [txt "Result"];
       p (render_result value);

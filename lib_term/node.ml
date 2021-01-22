@@ -12,7 +12,7 @@ module Make (Metadata : sig type t end) = struct
     | Map_input of { source : generic; info : (string, [`Blocked | `Empty_list]) result }
     | Opt_input of { source : generic }
     | State of { source : generic; hidden : bool }
-    | Catch of { source : generic; hidden : bool }
+    | Catch of { source : generic; hidden : bool; label : string }
     | Map of generic
     | Bind_in of generic * string
     | Bind_out of generic Current_incr.t

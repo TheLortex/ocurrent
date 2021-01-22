@@ -83,8 +83,8 @@ module Make (Metadata : sig type t end) = struct
   let state ?(hidden=false) t =
     node (State { source = Term t; hidden }) @@ Current_incr.map Dyn.state t.v
 
-  let catch ?(hidden=false) t =
-    node (Catch { source = Term t; hidden }) @@ Current_incr.map Dyn.catch t.v
+  let catch ?(hidden=false) ?(label="") t =
+    node (Catch { source = Term t; hidden; label }) @@ Current_incr.map Dyn.catch t.v
 
   let component fmt = Fmt.str ("@[<v>" ^^ fmt ^^ "@]")
 
@@ -182,7 +182,7 @@ module Make (Metadata : sig type t end) = struct
     let rec aux = function
       | [] -> return (Ok ())
       | (l, x) :: xs ->
-        let+ x = catch x ~hidden:true
+        let+ x = catch x ~hidden:true ~label:l
         and+ xs = aux xs in
         match x with
         | Ok () -> xs
