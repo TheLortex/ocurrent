@@ -49,19 +49,19 @@ module Make (Meta : sig type t end) = struct
       match t.ty with 
     | Constant None -> 
       begin match t.bind with
-        | Some ctx -> Fmt.pf f "<%a>" pp_meta ctx
+        | Some ctx -> Fmt.pf f "||%a||" pp_meta ctx
         | None ->
           match Current_incr.observe t.v with
           | Error (_, `Active _) -> Fmt.string f "(input)"
           | _ -> Fmt.string f "(const)"
       end
-    | Constant (Some l) -> Fmt.pf f "<%s>" l
-    | Map_input { source = _; info = Ok label } -> Fmt.string f label
+    | Constant (Some l) -> Fmt.pf f "|%s|" l
+    | Map_input { source = _; info = Ok label } -> Fmt.pf f "(%s)" label
     | Map_input { source = _; info = Error `Blocked } -> Fmt.string f "(blocked)"
     | Map_input { source = _; info = Error `Empty_list } -> Fmt.string f "(empty list)"
     | Opt_input _ -> Fmt.pf f "opt_input"
-    | Bind_in _ -> Fmt.pf f "bind_in"
-    | Bind_out _ -> Fmt.pf f "bind_out"
+    | Bind_in (x,_) -> Fmt.pf f "bind_in: %a." pp_meta x
+    | Bind_out x -> Fmt.pf f "bind_out: %a." pp_meta (Current_incr.observe x)
     | Primitive {info; _} -> Fmt.pf f "|>> %s" (Astring.String.map (function '\n' -> ' ' | c -> c ) info)
     | Pair _ -> Fmt.pf f "pair"
     | Gate_on _ -> Fmt.pf f "gate"
@@ -232,7 +232,10 @@ module Make (Meta : sig type t end) = struct
             in
             let all_inputs = Id_out_node.union inputs ctx in
             Id_out_node.singleton ~direct_deps:inputs ~deps:all_inputs t.id
-          | Bind_out x -> aux (Current_incr.observe x)
+          | Bind_out x ->
+            let inputs =  aux (Current_incr.observe x) in
+            let all_inputs = Id_out_node.union inputs ctx in
+            Id_out_node.singleton ~direct_deps:inputs ~deps:all_inputs t.id
           | Primitive {x; info; meta} ->
             let inputs =
               match x with
@@ -240,7 +243,7 @@ module Make (Meta : sig type t end) = struct
               | _ -> aux x
             in
             let all_inputs = Id_out_node.union inputs ctx in
-            Id_out_node.singleton ~direct_deps:inputs ~deps:all_inputs t.id
+            Id_out_node.singleton ~direct_deps:inputs ~deps:inputs t.id
           | Pair (x, y) ->
             let inputs = Id_out_node.union (aux x) (aux y) in
             let all_inputs = Id_out_node.union ctx inputs in
@@ -293,7 +296,7 @@ module Make (Meta : sig type t end) = struct
             let id = Id.mint () in
             let good_node = Id_out_node.singleton ~label:key ~direct_deps:outputs ~deps:all_outputs id in
             seen := Id.Map.add id good_node !seen;
-            Id_out_node.singleton ~direct_deps:(Id_out_node.union fake_node good_node) ~deps:(Id_out_node.union fake_node good_node) t.id
+            Id_out_node.singleton ~direct_deps:(Id_out_node.union fake_node good_node) ~deps:(fake_node |> Id_out_node.union good_node |> Id_out_node.union ctx) t.id
         in
         seen := Id.Map.add t.id outputs !seen;
         nodes := Id.Map.add t.id (Term t) !nodes;
@@ -321,26 +324,25 @@ module Make (Meta : sig type t end) = struct
   let to_dag (Term t) =
     let nodes, term_reverse_map = to_dag (Term t) in
     let rec explore (ids: Id.t list) (stop_at: Id.Set.t) =
-      let perform_single id stop_at =  
-        if Id.Set.mem id stop_at then Empty_node
-        else 
-          let node = Id.Map.find id nodes in
-          let parents = node.deps in
-          match Id.Map.find_opt id term_reverse_map, Id.Set.to_seq parents |> List.of_seq with 
-          | Some term, [] -> Node term
-          | Some term, req -> Seq (node.label, [explore req stop_at; Node term])
-          | None, [] -> Empty_node
-          | None, req -> Seq (node.label, [explore req stop_at])
+      let perform_single id stop_at =
+        let node = Id.Map.find id nodes in
+        let parents = node.deps in
+        match Id.Map.find_opt id term_reverse_map, Id.Set.to_seq parents |> List.of_seq with 
+        | Some term, [] -> Node term
+        | Some term, req -> Seq (node.label, [explore req stop_at; Node term])
+        | None, [] -> Empty_node
+        | None, req -> Seq (node.label, [explore req stop_at])
       in
       (* explore that list of nodes *)
-      match ids with 
+      match List.filter (fun id -> not (Id.Set.mem id stop_at)) ids with 
       | [] -> Empty_node
       | [id] -> perform_single id stop_at
       | lst -> 
-        let transdeps = lst |> List.map (fun id -> (Id.Map.find id nodes).trans) |> reduce Id.Set.inter |> Option.get in
-        let op = Par (lst |> List.map (fun id -> perform_single id (transdeps |> Id.Set.union stop_at))) in
-        let rest = get_topological_bottoms nodes transdeps |> Id.Set.to_seq |> List.of_seq in
-        Seq (None, [explore rest stop_at; op] )
+        let common_ancestors = lst |> List.map (fun id -> (Id.Map.find id nodes).trans) |> reduce Id.Set.inter |> Option.get in
+        let op = Par (lst |> List.map (fun id -> perform_single id (common_ancestors |> Id.Set.union stop_at))) in
+        match get_topological_bottoms nodes common_ancestors |> Id.Set.to_seq |> List.of_seq with 
+        | [] -> op
+        | rest -> Seq (None, [explore rest stop_at; op] )
     in
     explore [t.id] Id.Set.empty
 
