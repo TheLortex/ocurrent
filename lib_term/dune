@@ -2,6 +2,7 @@
  (public_name current.term)
  (name current_term)
  (libraries
+   astring
    bos
    fmt
    current_incr)
