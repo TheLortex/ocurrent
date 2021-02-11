@@ -656,7 +656,7 @@ module Make (Meta : sig type t end) = struct
               let inputs = aux input in
               let all_inputs = Out_node.union inputs ctx in
               let url = collapse_link ~k:key ~v:value in
-              node ?url i "+";
+              node ?url i ("+ "^key);
               Out_node.connect (edge_to i) all_inputs;
               Out_node.singleton ~deps:all_inputs i
             )
