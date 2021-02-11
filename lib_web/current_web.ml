@@ -40,6 +40,7 @@ let routes engine =
   Routes.[
     empty @--> Main.r ~engine;
     s "index.html" /? nil @--> Main.r ~engine;
+    s "pipeline.html" /? nil @--> Pipeline_page.r ~engine;
     s "css" / s "style.css" /? nil @--> Style.r;
     s "pipeline.svg" /? nil @--> Pipeline.r ~engine;
     s "query" /? nil @--> Query.r ~engine;
