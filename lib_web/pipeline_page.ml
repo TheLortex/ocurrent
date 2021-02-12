@@ -43,12 +43,6 @@ let r ~engine = object
       update, url 
     in
     Context.respond_ok ctx [
-      script (Unsafe.data {|
-      function setLogsUrl(url) {
-        let logs = document.getElementById("logs_iframe");
-        logs.src = url;
-      }
-      |});
       style [Unsafe.data {|
       #pipeline_container {
         display: flex;
@@ -59,6 +53,8 @@ let r ~engine = object
         flex: 1;
         border: none;
         border-left: solid gray 1px;
+        padding-left: 10px;
+        margin-left: 10px;
       }
 
       |}];
@@ -70,8 +66,18 @@ let r ~engine = object
           h2 [txt "Settings"];
           settings ctx config;
         ];
-        iframe ~a:[a_id "logs_iframe"][]
-      ]
+        Unsafe.data "<iframe id='logs_iframe' scrolling='no'></iframe>"
+      ];
+      script (Unsafe.data {|
+        let logs = document.getElementById("logs_iframe");
+        logs.onload = function() {
+          logs.height = logs.contentWindow.document.body.scrollHeight;
+        }
+  
+        function setLogsUrl(url) {
+          logs.src = url;
+        }
+        |});
     ]
 
   method! nav_link = Some "New pipeline rendering"
