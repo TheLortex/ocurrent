@@ -478,7 +478,9 @@ module Make (Meta : sig type t end) = struct
           | None -> None, None
           | Some id -> job_info id
         in
-         Fmt.pf f "<a href='%a'>%s</a>" (Fmt.option Fmt.string) url info
+        match url with 
+        | None -> Fmt.pf f "<a>%s</a>" info
+        | Some url -> Fmt.pf f "<a href='#' onClick=\"setLogsUrl('%s'); return false;\">%s</a>" url info
       | meta -> Fmt.pf f "%a" pp_meta (Term t)
     )
     | Empty_node -> ()

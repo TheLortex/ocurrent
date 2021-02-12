@@ -43,13 +43,35 @@ let r ~engine = object
       update, url 
     in
     Context.respond_ok ctx [
-      div [
-        Unsafe.data (render_pipeline ~job_info pipeline);
-      ];
-      h2 [txt "Result"];
-      p (render_result value);
-      h2 [txt "Settings"];
-      settings ctx config;
+      script (Unsafe.data {|
+      function setLogsUrl(url) {
+        let logs = document.getElementById("logs_iframe");
+        logs.src = url;
+      }
+      |});
+      style [Unsafe.data {|
+      #pipeline_container {
+        display: flex;
+        flex-direction: row;
+      }
+
+      #logs_iframe {
+        flex: 1;
+        border: none;
+        border-left: solid gray 1px;
+      }
+
+      |}];
+      div ~a:[a_id "pipeline_container"] [
+        div ~a:[a_id "pipeline"] [
+          Unsafe.data (render_pipeline ~job_info pipeline);
+          h2 [txt "Result"];
+          p (render_result value);
+          h2 [txt "Settings"];
+          settings ctx config;
+        ];
+        iframe ~a:[a_id "logs_iframe"][]
+      ]
     ]
 
   method! nav_link = Some "New pipeline rendering"
