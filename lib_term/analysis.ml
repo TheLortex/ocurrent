@@ -480,7 +480,7 @@ module Make (Meta : sig type t end) = struct
         in
         match url with 
         | None -> Fmt.pf f "<a>%s</a>" info
-        | Some url -> Fmt.pf f "<a href='#' onClick=\"setLogsUrl('%s'); return false;\">%s</a>" url info
+        | Some url -> Fmt.pf f "<a href='#' onClick=\"setLogsUrl('%s?no_header'); return false;\">%s</a>" url info
       | meta -> Fmt.pf f "%a" pp_meta (Term t)
     )
     | Empty_node -> ()

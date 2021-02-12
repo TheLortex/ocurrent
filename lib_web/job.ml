@@ -22,6 +22,7 @@ let render ctx ~actions ~job_id ~log:path =
   let ansi = Current_ansi.create () in
   let action op = a_action (Fmt.str "/job/%s/%s" job_id op) in
   let csrf = Context.csrf ctx in
+  let no_header = Context.uri ctx |> Uri.query |> List.find_opt (fun (a, _) -> a = "no_header") |> Option.is_some in
   let rebuild_button =
     if actions#rebuild = None then []
     else
@@ -72,14 +73,18 @@ let render ctx ~actions ~job_id ~log:path =
           ol items]
       ]
   in
+  let bdy = 
+    history @
+    rebuild_button @
+    cancel_button @
+    start_button @
+    [pre [txt sep]] 
+  in
   let tmpl =
-    Context.template ctx (
-      history @
-      rebuild_button @
-      cancel_button @
-      start_button @
-      [pre [txt sep]]
-    )
+    if no_header then Fmt.to_to_string (Tyxml.Html.pp ()) (html (head (title (txt "")) [
+      link ~rel:[ `Stylesheet ] ~href:"/css/style.css" ();
+      meta ~a:[a_charset "UTF-8"] ();]) (body bdy)) else
+    Context.template ctx bdy
   in
   match String.cut ~sep tmpl with
   | None -> assert false
