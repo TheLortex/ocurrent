@@ -50,6 +50,7 @@ let r ~engine = object
       }
 
       #logs_iframe {
+        height: calc(100vh - 40px);
         flex: 1;
         border: none;
         border-left: solid gray 1px;
@@ -66,14 +67,11 @@ let r ~engine = object
           h2 [txt "Settings"];
           settings ctx config;
         ];
-        Unsafe.data "<iframe id='logs_iframe' scrolling='no'></iframe>"
+        Unsafe.data "<iframe id='logs_iframe' ></iframe>"
       ];
       script (Unsafe.data {|
         let logs = document.getElementById("logs_iframe");
-        logs.onload = function() {
-          logs.height = logs.contentWindow.document.body.scrollHeight;
-        }
-  
+
         function setLogsUrl(url) {
           logs.src = url;
         }
