@@ -452,8 +452,8 @@ module Make (Meta : sig type t end) = struct
   let rec pp_html_dag ~job_info f value = 
     let status = get_status value in
     let preopen = match status with 
-      | `Error | `Running | `Ready -> " open"
-      | _ -> "" 
+      | `Error -> " open"
+      | _ -> ""
     in
     match value with
     | Par lst -> begin 
@@ -473,14 +473,14 @@ module Make (Meta : sig type t end) = struct
     end
     | Node (Term t) -> (match t.ty with 
       | Primitive {info; meta; _} ->
-        let _, url =
+        (let _, url =
           match Current_incr.observe meta with
           | None -> None, None
           | Some id -> job_info id
         in
         match url with 
         | None -> Fmt.pf f "<a>%s</a>" info
-        | Some url -> Fmt.pf f "<a href='#' onClick=\"setLogsUrl('%s?no_header'); return false;\">%s</a>" url info
+        | Some url -> Fmt.pf f "<a href='#' onClick=\"setLogsUrl('%s?no_header'); return false;\">%s</a>" url info)
       | meta -> Fmt.pf f "%a" pp_meta (Term t)
     )
     | Empty_node -> ()
