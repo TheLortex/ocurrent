@@ -47,6 +47,12 @@ let r ~engine = object
       #pipeline_container {
         display: flex;
         flex-direction: row;
+        height: calc(100vh - 40px);
+      }
+
+      #pipeline {
+        height: calc(100vh - 40px);
+        overflow: auto;
       }
 
       #logs_iframe {
