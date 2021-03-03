@@ -56,7 +56,8 @@ module Make (Meta : sig type t end) = struct
           | _ -> Fmt.string f "(const)"
       end
     | Constant (Some l) -> Fmt.pf f "|%s|" l
-    | Map_input { source = _; info = Ok label } -> Fmt.pf f "(%s)" label
+    | Map_input { source = _; info = Ok label; url = ""} -> Fmt.pf f "%s" label
+    | Map_input { source = _; info = Ok label; url }  -> Fmt.pf f "<a href=\"%s\">%s</a>" url label
     | Map_input { source = _; info = Error `Blocked } -> Fmt.string f "(blocked)"
     | Map_input { source = _; info = Error `Empty_list } -> Fmt.string f "(empty list)"
     | Opt_input _ -> Fmt.pf f "opt_input"
@@ -552,14 +553,18 @@ module Make (Meta : sig type t end) = struct
               Out_node.singleton ~deps:ctx i
             )
           | Constant None -> ctx
-          | Map_input { source; info } ->
+          | Map_input { source; info; url } ->
             let label =
               match info with
               | Ok l -> l
               | Error `Blocked -> "(each item)"
               | Error `Empty_list -> "(empty list)"
             in
-            node i label;
+            if url = "" then 
+              node i label
+            else
+              node ~url i label
+            ;
             let source = aux source in
             Out_node.connect (edge_to i) source;
             let deps = Out_node.union source ctx in

@@ -20,6 +20,11 @@ module type ORDERED = sig
   val pp : t Fmt.t
 end
 
+module type ORDERED_URL = sig 
+    include ORDERED
+    val url : t Fmt.t
+end
+
 module type ANALYSIS = sig
   type 'a term
   (** See [TERM]. *)
@@ -111,13 +116,20 @@ module type TERM = sig
   (** [pair a b] is the pair containing the results of evaluating [a] and [b]
       (in parallel). *)
 
-  val list_map : (module ORDERED with type t = 'a) -> ?collapse_key:string -> ('a t -> 'b t) -> 'a list t -> 'b list t
-  (** [list_map (module T) f xs] adds [f] to the end of each input term
-      and collects all the results into a single list.
-      @param T Used to display labels for each item, and to avoid recreating pipelines
-               unnecessarily.
-      @param collapse_key If given, each element is wrapped with [collapse]. *)
+val list_map_url : (module ORDERED_URL with type t = 'a) -> ?collapse_key:string -> ('a t -> 'b t) -> 'a list t -> 'b list t
+(** [list_map_url (module T) f xs] adds [f] to the end of each input term
+    and collects all the results into a single list.
+    @param T Used to display labels for each item, and to avoid recreating pipelines, also add links.
+              unnecessarily.
+    @param collapse_key If given, each element is wrapped with [collapse]. *)
 
+val list_map : (module ORDERED with type t = 'a) -> ?collapse_key:string -> ('a t -> 'b t) -> 'a list t -> 'b list t
+(** [list_map (module T) f xs] adds [f] to the end of each input term
+    and collects all the results into a single list.
+    @param T Used to display labels for each item, and to avoid recreating pipelines
+              unnecessarily.
+    @param collapse_key If given, each element is wrapped with [collapse]. *)
+            
   val list_iter : (module ORDERED with type t = 'a) -> ?collapse_key:string -> ('a t -> unit t) -> 'a list t -> unit t
   (** Like [list_map] but for the simpler case when the result is unit. *)
 

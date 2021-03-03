@@ -70,8 +70,8 @@ module Make (Metadata : sig type t end) = struct
   let return ?label x =
     node (Constant label) @@ Current_incr.const (Dyn.return x)
 
-  let map_input ~label source x =
-    node (Map_input {source = Term source; info = label}) @@ Current_incr.const x
+  let map_input ?(url="") ~label source x =
+    node (Map_input {source = Term source; info = label; url}) @@ Current_incr.const x
 
   let option_input source x =
     node (Opt_input {source = Term source }) @@ Current_incr.const x
@@ -236,55 +236,59 @@ module Make (Metadata : sig type t end) = struct
       y :: ys
 
 
-  let list_map (type a) (module M : S.ORDERED with type t = a) ?collapse_key (f : a t -> 'b t) (input : a list t) =
-    let module Map = Map.Make(M) in
-    let module Sep = Current_incr.Separate(Map) in
-    (* Stage 1 : convert input list to a set.
-       This runs whenever the input list changes. *)
-    let as_map =
-      input.v |> Current_incr.map @@ function
-      | Ok items -> items |> List.fold_left (fun acc x -> Map.add x () acc) Map.empty
-      | _ -> Map.empty
-    in
-    (* Stage 2 : process each element separately.
-       We only process an element when it is first added to the set,
-       not on every change to the set. *)
-    let results =
-      Sep.map as_map @@ fun item ->
-      let label = Fmt.to_to_string M.pp item in
-      let input = map_input ~label:(Ok label) input (Ok item) in
-      let output = f input in
-      match collapse_key with
-      | None -> Current_incr.write output
-      | Some key -> Current_incr.write (collapse ~key ~value:label ~input output)
-    in
-    (* Stage 3 : combine results.
-       This runs whenever either the set of results changes, or the input list changes
-       (since the output order might need to change). *)
-    let results =
-      Current_incr.of_cc begin
-        Current_incr.read input.v @@ function
-        | Error _ as r ->
-          (* Not ready; use static version of map. *)
-          let output = f (map_input input ~label:(Error `Blocked) r) in
-          Current_incr.write @@ replace output r
-        | Ok [] ->
-          (* Empty list; show what would have been done. *)
-          let no_items = Error (Id.mint (), `Active `Ready) in
-          let output = f (map_input input ~label:(Error `Empty_list) no_items) in
-          Current_incr.write @@ replace output (Ok [])
-        | Ok items ->
-          Current_incr.read results @@ fun results ->
-          (* Convert result set to a results list. *)
-          let results = items |> List.map (fun item -> Map.find item results) |> list_seq in
-          Current_incr.write results
-      end
-    in
-    let output = Current_incr.map (fun x -> Term x) results in
-    node (List_map { items = Term input; output }) (join results)
+  let list_map_url (type a) (module M : S.ORDERED_URL with type t = a) ?collapse_key (f : a t -> 'b t) (input : a list t) =
+      let module Map = Map.Make(M) in
+      let module Sep = Current_incr.Separate(Map) in
+      (* Stage 1 : convert input list to a set.
+          This runs whenever the input list changes. *)
+      let as_map =
+        input.v |> Current_incr.map @@ function
+        | Ok items -> items |> List.fold_left (fun acc x -> Map.add x () acc) Map.empty
+        | _ -> Map.empty
+      in
+      (* Stage 2 : process each element separately.
+          We only process an element when it is first added to the set,
+          not on every change to the set. *)
+      let results =
+        Sep.map as_map @@ fun item ->
+        let label = Fmt.to_to_string M.pp item in
+        let url = Fmt.to_to_string M.url item in
+        let input = map_input ~label:(Ok label) ~url input (Ok item) in
+        let output = f input in
+        match collapse_key with
+        | None -> Current_incr.write output
+        | Some key -> Current_incr.write (collapse ~key ~value:label ~input output)
+      in
+      (* Stage 3 : combine results.
+          This runs whenever either the set of results changes, or the input list changes
+          (since the output order might need to change). *)
+      let results =
+        Current_incr.of_cc begin
+          Current_incr.read input.v @@ function
+          | Error _ as r ->
+            (* Not ready; use static version of map. *)
+            let output = f (map_input input ~label:(Error `Blocked) r) in
+            Current_incr.write @@ replace output r
+          | Ok [] ->
+            (* Empty list; show what would have been done. *)
+            let no_items = Error (Id.mint (), `Active `Ready) in
+            let output = f (map_input input ~label:(Error `Empty_list) no_items) in
+            Current_incr.write @@ replace output (Ok [])
+          | Ok items ->
+            Current_incr.read results @@ fun results ->
+            (* Convert result set to a results list. *)
+            let results = items |> List.map (fun item -> Map.find item results) |> list_seq in
+            Current_incr.write results
+        end
+      in
+      let output = Current_incr.map (fun x -> Term x) results in
+      node (List_map { items = Term input; output }) (join results)
+    
+  let list_map (type a) (module M : S.ORDERED with type t = a) =
+    list_map_url (module struct include M let url _ _ = () end)
 
   let list_iter (type a) (module M : S.ORDERED with type t = a) ?collapse_key f (xs : a list t) =
-    let+ (_ : unit list) = list_map (module M) ?collapse_key f xs in
+    let+ (_ : unit list) = list_map_url (module struct include M let url _ _ = () end) ?collapse_key f xs in
     ()
 
   let option_seq : 'a t option -> 'a option t = function

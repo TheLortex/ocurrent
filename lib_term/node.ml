@@ -9,7 +9,7 @@ module Make (Metadata : sig type t end) = struct
   and bind_context = generic option
   and metadata_ty =
     | Constant of string option
-    | Map_input of { source : generic; info : (string, [`Blocked | `Empty_list]) result }
+    | Map_input of { source : generic; info : (string, [`Blocked | `Empty_list]) result; url: string }
     | Opt_input of { source : generic }
     | State of { source : generic; hidden : bool }
     | Catch of { source : generic; hidden : bool; label : string }
