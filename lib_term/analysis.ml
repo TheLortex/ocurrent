@@ -449,26 +449,26 @@ module Make (Meta : sig type t end) = struct
     | Empty_node -> `Error
 
 
-  let rec pp_html_dag ~job_info f value = 
+  let rec pp_html_dag ~job_info ?(depth=1) f value = 
     let status = get_status value in
-    let preopen = match status with 
-      | `Error -> " open"
-      | _ -> ""
+    let preopen, next_depth = match status with 
+      | `Error | `Running when depth < 3 -> " open", depth+1
+      | _ -> "", depth
     in
     match value with
     | Par lst -> begin 
       Fmt.pf f "<div>"; 
-      List.iter (fun i -> Fmt.pf f "<div style='margin: 4px; padding-left: 16px; border-left: solid %s 3px'><div>%a</div></div>" (get_status i |> color_of_status) (pp_html_dag ~job_info) i) lst; 
+      List.iter (fun i -> Fmt.pf f "<div style='margin: 4px; padding-left: 16px; border-left: solid %s 3px'><div>%a</div></div>" (get_status i |> color_of_status) (pp_html_dag ~job_info ~depth) i) lst; 
       Fmt.pf f "</div>"
     end
     | Seq (Some lbl, lst) -> begin 
       Fmt.pf f "<details%s><summary>%s</summary><ol style='list-style: none; padding-left: 0'>" preopen lbl; 
-      List.iteri (fun k i -> Fmt.pf f "<li><span style='color: %s'>%d. </span><div style='display: inline-block; vertical-align: top'>%a</div>" (get_status i |> color_of_status) (k+1) (pp_html_dag ~job_info) i) lst; 
+      List.iteri (fun k i -> Fmt.pf f "<li><span style='color: %s'>%d. </span><div style='display: inline-block; vertical-align: top'>%a</div>" (get_status i |> color_of_status) (k+1) (pp_html_dag ~job_info ~depth:next_depth) i) lst; 
       Fmt.pf f "</ol></details>"
     end
     | Seq (None, lst) -> begin
       Fmt.pf f "<ol style='list-style: none; padding-left: 0'>";
-      List.iteri (fun k i -> Fmt.pf f "<li><span style='color: %s'>%d. </span><div style='display: inline-block; vertical-align: top'>%a</div>" (get_status i |> color_of_status) (k+1) (pp_html_dag ~job_info) i) lst;
+      List.iteri (fun k i -> Fmt.pf f "<li><span style='color: %s'>%d. </span><div style='display: inline-block; vertical-align: top'>%a</div>" (get_status i |> color_of_status) (k+1) (pp_html_dag ~job_info ~depth) i) lst;
       Fmt.pf f "</ol>";
     end
     | Node (Term t) -> (match t.ty with 
