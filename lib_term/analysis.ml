@@ -162,8 +162,8 @@ module Make (Meta : sig type t end) = struct
   module Id_out_node = Out_node_make(Id.Set)
 
   let colour_of_activity = function
-    | `Ready -> "#ffff00"
-    | `Running -> "#ffa500"
+    | `Ready -> "#e8e9a1"
+    | `Running -> "#e6b566"
 
   type dag = Seq of (string option * dag list) | Par of dag list | Node of generic | Empty_node
   
@@ -398,24 +398,26 @@ module Make (Meta : sig type t end) = struct
   | Empty_node -> Empty_node
 
 
-  type status = [`Done | `Ready | `Running | `Error | `Blocked]
+  module Status = struct 
+    type t = [`Done | `Ready | `Running | `Error | `Blocked]
 
-
-  let int_of_status = function 
+    let to_int = function 
     | `Done -> 0
     | `Blocked -> 1
     | `Ready -> 2
     | `Running -> 3
     | `Error -> 4 
-      
 
-  let color_of_status = function 
-    | `Done -> "#90ee90"
-    | `Blocked -> "#d3d3d3"
-    | `Error -> "#ff4500"
+    let to_color = function 
+    | `Done -> "#a3ddcb"
+    | `Blocked -> "#d3e0dc"
+    | `Error -> "#e5707e"
     | `Ready | `Running as x -> colour_of_activity x
 
-  let get_term_status (Term t) : status =
+    let compare a b = compare (to_int a) (to_int b)
+  end
+
+  let get_term_status (Term t) : Status.t =
     let v = Current_incr.observe t.v in 
     let error_from_self =
       match v with
@@ -436,22 +438,67 @@ module Make (Meta : sig type t end) = struct
     match v with 
     | Ok _ -> `Done
     | Error _ when not error_from_self -> `Blocked (* Blocked *)
-    | Error (_, `Active x) -> (x :> status)
+    | Error (_, `Active x) -> (x :> Status.t)
     | Error (_, `Msg _) -> `Error
 
-  let rec get_status = function 
-    | Par lst | Seq (_, lst)  -> 
-      let statuses = List.map get_status lst in
-      let (v, _) = List.fold_left (fun (k,v) s  -> 
-        let v2 = int_of_status s in 
-        if v2 > v then (s, v2) else (k, v) ) (`Done, 0) statuses 
-      in v
-    | Node t -> get_term_status t
-    | Empty_node -> `Error
+
+  module Node_stat = struct 
+
+    module StatusMap = Map.Make(Status)
+
+    type t = int StatusMap.t
+
+    let empty = StatusMap.empty
+
+    let status t = fst (StatusMap.max_binding_opt t |> Option.value ~default:(`Done, 0))
+
+    let add node = 
+      let status = get_term_status node in
+      StatusMap.update status (function 
+        | None -> Some 1
+        | Some n -> Some (n+1))
+
+    let get_stats value = 
+      let result = ref empty in 
+      let rec aux = 
+        function 
+        | Par lst | Seq (_, lst)  -> List.iter aux lst
+        | Node t -> result := add t !result
+        | Empty_node -> ()
+      in 
+      let () = aux value in
+      !result
+
+
+
+    let pp_indicator f t =
+      let render_order = function 
+        | `Done -> 0
+        | `Ready -> 2
+        | `Running -> 3
+        | `Error -> 4 
+        | `Blocked -> 5
+      in
+      if StatusMap.cardinal t <= 1 then 
+        Fmt.pf f ""
+      else
+        let bindings = StatusMap.bindings t |> List.sort (fun (k1,_) (k2,_) -> compare (render_order k1) (render_order k2)) in
+        let total = bindings |> List.map snd |> List.fold_left (+) 0 |> float_of_int in
+        let position = ref 0. in
+        let pp_stat f (k,v) =
+          let percent = (v * 100 |> float_of_int) /. total in 
+          let color = Status.to_color k in
+          let vmin, vmax = !position, !position+.percent in 
+          position := vmax;
+          Fmt.pf f "%s %f%%, %s %f%%" color vmin color vmax  
+        in
+        Fmt.pf f "<div style=\"flex: 1\"></div><div style=\"flex: 100; margin: 2px 10px; max-width: 100px; background: linear-gradient(to right, %a)\"></div>" (Fmt.list ~sep:(Fmt.any ", ") pp_stat) bindings
+  end
 
 
   let rec pp_html_dag ~job_info ?(depth=1) f value = 
-    let status = get_status value in
+    let stats = Node_stat.get_stats value in
+    let status = Node_stat.status stats in
     let preopen, next_depth = match status with 
       | `Error | `Running when depth < 3 -> " open", depth+1
       | _ -> "", depth
@@ -459,17 +506,17 @@ module Make (Meta : sig type t end) = struct
     match value with
     | Par lst -> begin 
       Fmt.pf f "<div>"; 
-      List.iter (fun i -> Fmt.pf f "<div style='margin: 4px; padding-left: 16px; border-left: solid %s 3px'><div>%a</div></div>" (get_status i |> color_of_status) (pp_html_dag ~job_info ~depth) i) lst; 
+      List.iter (fun i -> Fmt.pf f "<div style='margin: 4px; margin-right: 0; padding-left: 16px; border-left: solid %s 3px'><div>%a</div></div>" (i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color) (pp_html_dag ~job_info ~depth) i) lst; 
       Fmt.pf f "</div>"
     end
     | Seq (Some lbl, lst) -> begin 
-      Fmt.pf f "<details%s><summary>%s</summary><ol style='list-style: none; padding-left: 0'>" preopen lbl; 
-      List.iteri (fun k i -> Fmt.pf f "<li><span style='color: %s'>%d. </span><div style='display: inline-block; vertical-align: top'>%a</div>" (get_status i |> color_of_status) (k+1) (pp_html_dag ~job_info ~depth:next_depth) i) lst; 
+      Fmt.pf f "<details%s><summary><div style=\"display: inline-flex; width: calc(100%% - 30px)\">%s %a</div></summary><ol style='list-style: none; padding-left: 0'>" preopen lbl Node_stat.pp_indicator stats; 
+      List.iteri (fun k i -> Fmt.pf f "<li><div style='display: flex; vertical-align: top; width: 100%%; '><span style='color: %s'>%d.&nbsp;</span><div style=\"flex: 1\">%a</div></div>" (i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color) (k+1) (pp_html_dag ~job_info ~depth:next_depth) i) lst; 
       Fmt.pf f "</ol></details>"
     end
     | Seq (None, lst) -> begin
       Fmt.pf f "<ol style='list-style: none; padding-left: 0'>";
-      List.iteri (fun k i -> Fmt.pf f "<li><span style='color: %s'>%d. </span><div style='display: inline-block; vertical-align: top'>%a</div>" (get_status i |> color_of_status) (k+1) (pp_html_dag ~job_info ~depth) i) lst;
+      List.iteri (fun k i -> Fmt.pf f "<li><div style='display: flex; vertical-align: top; width: 100%%; '><span style='color: %s'>%d.&nbsp;</span><div style=\"flex: 1\">%a</div></div>" (i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color) (k+1) (pp_html_dag ~job_info ~depth) i) lst;
       Fmt.pf f "</ol>";
     end
     | Node (Term t) -> (match t.ty with 
