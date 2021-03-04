@@ -458,18 +458,15 @@ module Make (Meta : sig type t end) = struct
         | None -> Some 1
         | Some n -> Some (n+1))
 
-    let get_stats value = 
-      let result = ref empty in 
-      let rec aux = 
-        function 
-        | Par lst | Seq (_, lst)  -> List.iter aux lst
-        | Node t -> result := add t !result
-        | Empty_node -> ()
-      in 
-      let () = aux value in
-      !result
+    let of_node node = 
+      let status = get_term_status node in
+      StatusMap.singleton status 1
 
-
+    let merge = StatusMap.merge 
+    (fun k v1 v2 -> match (v1, v2) with 
+      | None, None -> None
+      | Some a, None | None, Some a -> Some a
+      | Some a, Some b -> Some (a+b))
 
     let render_indicator t: [ | Html_types.div] Tyxml_html.elt list =
       let render_order = function 
@@ -500,27 +497,32 @@ module Make (Meta : sig type t end) = struct
   end
 
 
-  let rec to_html ~job_info ?(depth=1) value: [< Html_types.div_content_fun] Tyxml_html.elt = 
+  let rec to_html ~job_info ?(depth=1) value: [< Html_types.div_content_fun] Tyxml_html.elt * Node_stat.t = 
     let open Tyxml_html in
-    let stats = Node_stat.get_stats value in
-    let status = Node_stat.status stats in
-    let preopen, next_depth = match status with 
-      | `Error | `Running when depth < 3 -> [a_open ()], depth+1
-      | _ -> [], depth
-    in
     match value with
     | Par lst -> begin 
+      let html_stats = List.map (to_html ~job_info ~depth) lst in
+      let statuses = List.map snd html_stats in
+      let stats = List.fold_left Node_stat.merge Node_stat.empty statuses in
       div @@
-      List.map (fun i -> 
-        let color = i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color in
+      List.map (fun (html, subtask_stats) -> 
+        let color = subtask_stats |> Node_stat.status |> Status.to_color in
         div ~a:[a_style ("margin: 4px; margin-right: 0; padding-left: 16px; border-left: solid "^color^" 3px") ] [
-          div [
-            to_html ~job_info ~depth i
+          div [ html
           ]
         ]
-      ) lst
+      ) html_stats, 
+      stats
     end
     | Seq (Some lbl, lst) -> begin 
+      let html_stats = List.map (to_html ~job_info ~depth:(depth+1)) lst in
+      let statuses = List.map snd html_stats in
+      let stats = List.fold_left Node_stat.merge Node_stat.empty statuses in
+      let status = Node_stat.status stats in
+      let preopen = match status with 
+        | `Error | `Running when depth < 3 -> [a_open ()]
+        | _ -> []
+      in
       details ~a:preopen 
       (summary [span 
         ~a:[a_style "display: inline-flex; width: calc(100% - 30px)"]
@@ -530,36 +532,41 @@ module Make (Meta : sig type t end) = struct
       ])
       [
         ol ~a:[a_style "list-style: none; padding-left: 0"] (
-          List.mapi (fun k i -> 
-            let color = i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color in
+          List.mapi (fun k (html, subtask_stats) -> 
+            let color = subtask_stats |> Node_stat.status |> Status.to_color in
             li [
             div ~a:[a_style "display: flex; vertical-align: top; width: 100%;"] 
             [
               span ~a:[a_style ("color: "^color)] [Fmt.str "%d.&nbsp;" (k+1) |> Unsafe.data];
               div ~a:[a_style "flex: 1"] [
-                to_html ~job_info ~depth:next_depth i
+                html
               ]
             ]
-          ]) lst
+          ]) html_stats
         )
-      ]
+      ], stats
     end
     | Seq (None, lst) -> begin
+      let html_stats = List.map (to_html ~job_info ~depth) lst in
+      let statuses = List.map snd html_stats in
+      let stats = List.fold_left Node_stat.merge Node_stat.empty statuses in
       ol ~a:[a_style "list-style: none; padding-left: 0"] (
-        List.mapi (fun k i -> 
-          let color = i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color in
+        List.mapi (fun k (html, subtask_stats) -> 
+          let color = subtask_stats |> Node_stat.status |> Status.to_color in
           li [
           div ~a:[a_style "display: flex; vertical-align: top; width: 100%;"] 
           [
             span ~a:[a_style ("color: "^color)] [Fmt.str "%d.&nbsp;" (k+1) |> Unsafe.data];
             div ~a:[a_style "flex: 1"] [
-              to_html ~job_info ~depth i
+              html
             ]
           ]
-        ]) lst
-      )
+        ]) html_stats
+      ), stats
     end
-    | Node (Term t) -> (match t.ty with 
+    | Node (Term t) -> 
+      let stats = Node_stat.of_node (Term t) in
+      (match t.ty with 
       | Primitive {info; meta; _} ->
         (let _, url =
           match Current_incr.observe meta with
@@ -570,13 +577,14 @@ module Make (Meta : sig type t end) = struct
         | None -> a [txt info]
         | Some url -> a ~a:[a_href "#"; a_onclick (Fmt.str "setLogsUrl('%s?no_header'); return false;" url)] [txt info])
       | meta -> Unsafe.data (Fmt.to_to_string pp_meta (Term t))
-    )
-    | Empty_node -> span []
+      ), stats
+    | Empty_node -> span [], Node_stat.empty
 
   let to_html_css ~job_info x = 
     let dag = to_dag (Term x) in
     let dag = dag |> simplify |> Option.get |> flatten in
-    to_html ~job_info dag, ""
+    let html, _ =  to_html ~job_info dag in
+    html, ""
 
   let pp_dot ~env ~collapse_link ~job_info f x =
     let env = Env.of_seq (List.to_seq env) in
