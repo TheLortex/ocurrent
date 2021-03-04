@@ -471,7 +471,7 @@ module Make (Meta : sig type t end) = struct
 
 
 
-    let pp_indicator f t =
+    let render_indicator t: [ | Html_types.div] Tyxml_html.elt list =
       let render_order = function 
         | `Done -> 0
         | `Ready -> 2
@@ -480,7 +480,7 @@ module Make (Meta : sig type t end) = struct
         | `Blocked -> 5
       in
       if StatusMap.cardinal t <= 1 then 
-        Fmt.pf f ""
+        []
       else
         let bindings = StatusMap.bindings t |> List.sort (fun (k1,_) (k2,_) -> compare (render_order k1) (render_order k2)) in
         let total = bindings |> List.map snd |> List.fold_left (+) 0 |> float_of_int in
@@ -492,32 +492,72 @@ module Make (Meta : sig type t end) = struct
           position := vmax;
           Fmt.pf f "%s %f%%, %s %f%%" color vmin color vmax  
         in
-        Fmt.pf f "<div style=\"flex: 1\"></div><div style=\"flex: 100; margin: 2px 10px; max-width: 100px; background: linear-gradient(to right, %a)\"></div>" (Fmt.list ~sep:(Fmt.any ", ") pp_stat) bindings
+        let open Tyxml_html in
+        [
+          div ~a:[a_style "flex: 1"] [];
+          div ~a:[a_style @@ Fmt.str "flex: 100; margin: 2px 10px; max-width: 100px; background: linear-gradient(to right, %a)" (Fmt.list ~sep:(Fmt.any ", ") pp_stat) bindings] []
+        ]
   end
 
 
-  let rec pp_html_dag ~job_info ?(depth=1) f value = 
+  let rec to_html ~job_info ?(depth=1) value: [< Html_types.div_content_fun] Tyxml_html.elt = 
+    let open Tyxml_html in
     let stats = Node_stat.get_stats value in
     let status = Node_stat.status stats in
     let preopen, next_depth = match status with 
-      | `Error | `Running when depth < 3 -> " open", depth+1
-      | _ -> "", depth
+      | `Error | `Running when depth < 3 -> [a_open ()], depth+1
+      | _ -> [], depth
     in
     match value with
     | Par lst -> begin 
-      Fmt.pf f "<div>"; 
-      List.iter (fun i -> Fmt.pf f "<div style='margin: 4px; margin-right: 0; padding-left: 16px; border-left: solid %s 3px'><div>%a</div></div>" (i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color) (pp_html_dag ~job_info ~depth) i) lst; 
-      Fmt.pf f "</div>"
+      div @@
+      List.map (fun i -> 
+        let color = i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color in
+        div ~a:[a_style ("margin: 4px; margin-right: 0; padding-left: 16px; border-left: solid "^color^" 3px") ] [
+          div [
+            to_html ~job_info ~depth i
+          ]
+        ]
+      ) lst
     end
     | Seq (Some lbl, lst) -> begin 
-      Fmt.pf f "<details%s><summary><div style=\"display: inline-flex; width: calc(100%% - 30px)\">%s %a</div></summary><ol style='list-style: none; padding-left: 0'>" preopen lbl Node_stat.pp_indicator stats; 
-      List.iteri (fun k i -> Fmt.pf f "<li><div style='display: flex; vertical-align: top; width: 100%%; '><span style='color: %s'>%d.&nbsp;</span><div style=\"flex: 1\">%a</div></div>" (i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color) (k+1) (pp_html_dag ~job_info ~depth:next_depth) i) lst; 
-      Fmt.pf f "</ol></details>"
+      details ~a:preopen 
+      (summary [span 
+        ~a:[a_style "display: inline-flex; width: calc(100% - 30px)"]
+        ([
+          txt lbl;
+        ] @ (Node_stat.render_indicator stats |> List.map Unsafe.coerce_elt))
+      ])
+      [
+        ol ~a:[a_style "list-style: none; padding-left: 0"] (
+          List.mapi (fun k i -> 
+            let color = i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color in
+            li [
+            div ~a:[a_style "display: flex; vertical-align: top; width: 100%;"] 
+            [
+              span ~a:[a_style ("color: "^color)] [Fmt.str "%d.&nbsp;" (k+1) |> Unsafe.data];
+              div ~a:[a_style "flex: 1"] [
+                to_html ~job_info ~depth:next_depth i
+              ]
+            ]
+          ]) lst
+        )
+      ]
     end
     | Seq (None, lst) -> begin
-      Fmt.pf f "<ol style='list-style: none; padding-left: 0'>";
-      List.iteri (fun k i -> Fmt.pf f "<li><div style='display: flex; vertical-align: top; width: 100%%; '><span style='color: %s'>%d.&nbsp;</span><div style=\"flex: 1\">%a</div></div>" (i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color) (k+1) (pp_html_dag ~job_info ~depth) i) lst;
-      Fmt.pf f "</ol>";
+      ol ~a:[a_style "list-style: none; padding-left: 0"] (
+        List.mapi (fun k i -> 
+          let color = i |> Node_stat.get_stats |> Node_stat.status |> Status.to_color in
+          li [
+          div ~a:[a_style "display: flex; vertical-align: top; width: 100%;"] 
+          [
+            span ~a:[a_style ("color: "^color)] [Fmt.str "%d.&nbsp;" (k+1) |> Unsafe.data];
+            div ~a:[a_style "flex: 1"] [
+              to_html ~job_info ~depth i
+            ]
+          ]
+        ]) lst
+      )
     end
     | Node (Term t) -> (match t.ty with 
       | Primitive {info; meta; _} ->
@@ -527,16 +567,16 @@ module Make (Meta : sig type t end) = struct
           | Some id -> job_info id
         in
         match url with 
-        | None -> Fmt.pf f "<a>%s</a>" info
-        | Some url -> Fmt.pf f "<a href='#' onClick=\"setLogsUrl('%s?no_header'); return false;\">%s</a>" url info)
-      | meta -> Fmt.pf f "%a" pp_meta (Term t)
+        | None -> a [txt info]
+        | Some url -> a ~a:[a_href "#"; a_onclick (Fmt.str "setLogsUrl('%s?no_header'); return false;" url)] [txt info])
+      | meta -> Unsafe.data (Fmt.to_to_string pp_meta (Term t))
     )
-    | Empty_node -> ()
+    | Empty_node -> span []
 
-  let pp_html ~job_info f x = 
+  let to_html_css ~job_info x = 
     let dag = to_dag (Term x) in
     let dag = dag |> simplify |> Option.get |> flatten in
-    pp_html_dag ~job_info f dag
+    to_html ~job_info dag, ""
 
   let pp_dot ~env ~collapse_link ~job_info f x =
     let env = Env.of_seq (List.to_seq env) in

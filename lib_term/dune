@@ -5,5 +5,7 @@
    astring
    bos
    fmt
+   tyxml
+   tyxml.functor
    current_incr)
  (preprocess (pps ppx_deriving.std)))

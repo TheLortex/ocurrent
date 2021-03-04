@@ -11,5 +11,5 @@ module Make (Metadata : sig type t end) : sig
     collapse_link:(k:string -> v:string -> string option) ->
     job_info:(Metadata.t -> Output.active option * string option) ->
     _ t Fmt.t
-  val pp_html : job_info:(Metadata.t -> Output.active option * string option) -> _ t Fmt.t
+  val to_html_css : job_info:(Metadata.t -> Output.active option * string option) -> _ t -> ([ | Html_types.div_content_fun] Tyxml.Html.elt * string)
 end with type 'a t := 'a Node.Make(Metadata).t

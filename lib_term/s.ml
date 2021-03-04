@@ -40,7 +40,7 @@ module type ANALYSIS = sig
   val pp : _ term Fmt.t
   (** [pp] formats a [t] as a simple string. *)
 
-  val pp_html : job_info:(metadata -> Output.active option * string option) -> _ term Fmt.t
+  val to_html_css : job_info:(metadata -> Output.active option * string option) -> _ term -> ([ | Html_types.div_content_fun] Tyxml.Html.elt * string)
 
   val pp_dot :
     env:(string * string) list ->

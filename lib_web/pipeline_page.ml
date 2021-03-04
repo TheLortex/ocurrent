@@ -26,9 +26,6 @@ let settings ctx config =
     input ~a:[a_input_type `Submit; a_value "Submit"] ();
   ]
 
-
-let render_pipeline ~job_info a = Fmt.str "%a" (Current.Analysis.pp_html ~job_info) a
-
 let r ~engine = object
   inherit Resource.t
 
@@ -42,6 +39,7 @@ let r ~engine = object
       let url = job_id |> Option.map (fun id -> Fmt.str "/job/%s" id) in
       update, url 
     in
+    let html, css = Current.Analysis.to_html_css ~job_info pipeline in
     Context.respond_ok ctx [
       style [Unsafe.data {|
       #pipeline_container {
@@ -67,7 +65,7 @@ let r ~engine = object
       |}];
       div ~a:[a_id "pipeline_container"] [
         div ~a:[a_id "pipeline"] [
-          Unsafe.data (render_pipeline ~job_info pipeline);
+          html;
           h2 [txt "Result"];
           p (render_result value);
           h2 [txt "Settings"];
