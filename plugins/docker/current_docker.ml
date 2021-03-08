@@ -25,6 +25,7 @@ module Raw = struct
       | None -> `File (Fpath.v "Dockerfile")
       | Some (`File _ as f) -> f
       | Some (`Contents c) -> `Contents (Dockerfile.string_of_t c)
+      | Some (`Contents_str c) -> `Contents c
     in
     BC.get ?schedule { Build.pull; pool; timeout }
       { Build.Key.commit; dockerfile; docker_context; squash; build_args }
